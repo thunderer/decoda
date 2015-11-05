@@ -63,7 +63,7 @@ class UrlFilterTest extends TestCase {
      */
     public function testUrlTargetAttribute() {
         $this->assertEquals('<a target="_blank" href="http://domain.com">http://domain.com</a>', $this->object->reset('[url target="blank"]http://domain.com[/url]')->parse());
-        $this->assertEquals('<a href="http://domain.com" target="_parent">Link</a>', $this->object->reset('[url="http://domain.com" target="parent"]Link[/url]')->parse());
+        $this->assertEquals('<a target="_parent" href="http://domain.com">Link</a>', $this->object->reset('[url="http://domain.com" target="parent"]Link[/url]')->parse());
     }
 
     /**
@@ -71,7 +71,7 @@ class UrlFilterTest extends TestCase {
      */
     public function testUrlWhenStrictIsFalse() {
         $this->object->setStrict(false);
-        $this->assertEquals('<a href="http://domain.com/">Test</a>', $this->object->reset('[url=http://domain.com/]Test[/url]')->parse());
+        $this->assertEquals('<a href="http://domain.com/">Test</a>', $this->object->reset('[url="http://domain.com/"]Test[/url]')->parse());
     }
 
     /**

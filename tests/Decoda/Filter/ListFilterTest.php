@@ -68,7 +68,7 @@ class ListFilterTest extends TestCase {
 
         // must be within list or olist
         $this->assertEquals('List item', $this->object->reset('[li]List item[/li]')->parse());
-        $this->assertEquals('[b]List item[/b]', $this->object->reset('[b][li]List item[/li][/b]')->parse());
+        $this->assertEquals('<b>List item</b>', $this->object->reset('[b][li]List item[/li][/b]')->parse());
     }
 
     /**

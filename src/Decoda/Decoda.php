@@ -12,6 +12,13 @@ use Decoda\Exception\MissingHookException;
 use Decoda\Exception\MissingItemException;
 use Decoda\Exception\MissingLocaleException;
 use \InvalidArgumentException;
+use Thunder\Shortcode\HandlerContainer\HandlerContainer;
+use Thunder\Shortcode\Parser\RegularParser;
+use Thunder\Shortcode\Processor\Processor;
+use Thunder\Shortcode\Shortcode\ParsedShortcodeInterface;
+use Thunder\Shortcode\Shortcode\ProcessedShortcode;
+use Thunder\Shortcode\Shortcode\ShortcodeInterface;
+use Thunder\Shortcode\Syntax\Syntax;
 
 if (!defined('ENT_SUBSTITUTE')) {
     define('ENT_SUBSTITUTE', 8);
@@ -657,6 +664,367 @@ class Decoda {
         return $string;
     }
 
+    private function addHandlers()
+    {
+        $isXhtml = $this->getConfig('xhtmlOutput');
+        $standaloneTags = $this->getConfig('standaloneTags');
+
+        $handlers = new HandlerContainer();
+
+        // VARIOUS
+        $handlers->add('lineBreaksRemove', function(ShortcodeInterface $s) {
+            return preg_replace('/(\\n|\\r\\n)/', '', $s->getContent());
+        });
+
+        // EMAIL FILTER
+        $handlers->add('email', function(ShortcodeInterface $s) {
+            $email = $s->getBbCode() ?: $s->getContent();
+            $content = $s->getContent();
+            if(filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $email = implode('', array_map(function($char) { return '&#'.ord($char).';'; }, str_split($email)));
+            } else {
+                return $content;
+            }
+            if(filter_var($content, FILTER_VALIDATE_EMAIL)) {
+                $content = implode('', array_map(function($char) { return '&#'.ord($char).';'; }, str_split($content)));
+            }
+
+            return '<a href="mailto:'.$email.'">'.$content.'</a>';
+        });
+
+        // LIST FILTER
+        $starsToList = function($content) {
+            return $content;
+        };
+        $handlers->add('list', function(ShortcodeInterface $s) use($starsToList) {
+            $type = $s->getBbCode() ? ' type-'.$s->getBbCode() : '';
+
+            return '<ul class="decoda-list'.$type.'">'.$starsToList($s->getContent()).'</ul>';
+        });
+        $handlers->addAlias('ul', 'list');
+        $handlers->add('olist', function(ShortcodeInterface $s) use($starsToList) {
+            $type = $s->getBbCode() ? ' type-'.$s->getBbCode() : '';
+
+            return '<ol class="decoda-olist'.$type.'">'.$starsToList($s->getContent()).'</ol>';
+        });
+        $handlers->add('ol', function(ShortcodeInterface $s) use($starsToList) {
+            $type = $s->getBbCode() ? ' type-'.$s->getBbCode() : '';
+
+            return '<ol class="decoda-olist'.$type.'">'.$starsToList($s->getContent()).'</ol>';
+        });
+        $handlers->add('li', function(ProcessedShortcode $s) {
+            if(!$s->getParent() || ($s->getParent() && !in_array($s->getParent()->getName(), array('ul', 'ol', 'list', 'olist')))) {
+                return $s->getContent();
+            }
+
+            return '<li>'.$s->getContent().'</li>';
+        });
+//            $handlers->addAlias('*', 'li');
+
+        // TABLE FILTER
+        $stripContent = function($content) use($handlers) {
+            $parser = new RegularParser();
+            $processor = new Processor($parser, $handlers);
+            $shortcodes = $parser->parse($content);
+
+            $result = array_reduce($shortcodes, function($result, ParsedShortcodeInterface $s) use($processor) {
+                return $result.$processor->process($s->getText());
+            }, '');
+
+            return $result;
+        };
+        $handlers->add('table', function(ProcessedShortcode $s) use($stripContent) {
+            $class = $s->getParameter('class') ? ' '.$s->getParameter('class') : '';
+//            $parser = new RegularParser();
+//            $shortcodes = $parser->parse($s->getContent());
+//            if(empty($shortcodes)) {
+//                return '<table class="decoda-table'.$class.'"></table>';
+//            }
+
+            return '<table class="decoda-table'.$class.'">'.$stripContent($s->getTextContent()).'</table>';
+        });
+        $handlers->add('thead', function(ProcessedShortcode $s) use($stripContent) {
+            if(!$s->getParent()) {
+                return $s->getContent();
+            }
+
+            return '<thead>'.$stripContent($s->getTextContent()).'</thead>';
+        });
+        $handlers->add('tbody', function(ProcessedShortcode $s) use($stripContent) {
+            if(!$s->getParent()) {
+                return $s->getContent();
+            }
+
+            return '<tbody>'.$stripContent($s->getTextContent()).'</tbody>';
+        });
+        $handlers->add('tfoot', function(ProcessedShortcode $s) use($stripContent) {
+            if(!$s->getParent()) {
+                return $s->getContent();
+            }
+
+            return '<tfoot>'.$stripContent($s->getTextContent()).'</tfoot>';
+        });
+        $handlers->add('th', function(ProcessedShortcode $s) {
+            return '<th>'.$s->getContent().'</th>';
+        });
+        $handlers->add('tr', function(ProcessedShortcode $s) use($stripContent) {
+            if(!$s->getParent()) {
+                return $s->getContent();
+            }
+
+            return '<tr>'.$s->getContent().'</tr>';
+        });
+        $handlers->add('td', function(ProcessedShortcode $s) {
+            if(!$s->getParent()) {
+                return $s->getContent();
+            }
+
+            if($s->getParent() && !in_array($s->getParent()->getName(), array('tr'))) {
+                return '';
+            }
+
+            $cols = $s->getParameter('colspan');
+            $cols = $cols ? ' colspan="'.$cols.'"' : '';
+
+            $rows = $s->getParameter('rowspan');
+            $rows = $rows ? ' rowspan="'.$rows.'"' : '';
+
+            return '<td'.$cols.$rows.'>'.$s->getContent().'</td>';
+        });
+        $handlers->add('row', function(ProcessedShortcode $s) use($stripContent) {
+            if(!$s->getParent()) {
+                return $s->getContent();
+            }
+
+            return '<tr>'.$s->getContent().'</tr>';
+        });
+        $handlers->add('col', function(ProcessedShortcode $s) {
+            if(!$s->getParent()) {
+                return $s->getContent();
+            }
+
+            if($s->getParent() && !in_array($s->getParent()->getName(), array('row'))) {
+                return '';
+            }
+
+            $cols = $s->getParameter('colspan');
+            $cols = $cols ? ' colspan="'.$cols.'"' : '';
+
+            $rows = $s->getParameter('rowspan');
+            $rows = $rows ? ' rowspan="'.$rows.'"' : '';
+
+            return '<td'.$cols.$rows.'>'.$s->getContent().'</td>';
+        });
+
+        // URL FILTER
+        $handlers->add('url', function(ProcessedShortcode $s) {
+            $url = $s->getBbCode() ?: $s->getParameter('href', $s->getContent());
+            $target = $s->hasParameter('target') ? 'target="_'.$s->getParameter('target').'" ' : '';
+
+            if(!preg_match('/^(\.\.?)?\//', $url)) {
+                if(!preg_match('/^(https?|ftp|irc|telnet)/i', $url)) {
+                    if(preg_match('/^(?![a-z]+:\/\/)/', $url) && filter_var('http://'.$url, FILTER_VALIDATE_URL)) {
+                        $url = 'http://'.$url;
+                    } else {
+                        return $url;
+                    }
+                }
+                if(!filter_var($url, FILTER_VALIDATE_URL)) {
+                    return $url;
+                }
+            }
+
+            return '<a '.$target.'href="'.$url.'">'.$s->getContent().'</a>';
+        });
+
+        // VIDEO FILTER
+        $handlers->add('video', function(ShortcodeInterface $s) {
+            static $sizes = array(
+                'youtube'       => array('small' => array(560, 315), 'medium' => array(640, 360), 'large' => array(853, 480)),
+                'vimeo'         => array('small' => array(400, 225), 'medium' => array(550, 309), 'large' => array(700, 394)),
+                'vevo'          => array('small' => array(400, 225), 'medium' => array(575, 324), 'large' => array(955, 538)),
+                'veoh'          => array('small' => array(410, 341), 'medium' => array(610, 507), 'large' => array(810, 674)),
+                'liveleak'      => array('small' => array(560, 315), 'medium' => array(640, 360), 'large' => array(853, 480)),
+                'dailymotion'   => array('small' => array(320, 180), 'medium' => array(480, 270), 'large' => array(560, 315)),
+                'myspace'       => array('small' => array(325, 260), 'medium' => array(425, 340), 'large' => array(525, 420)),
+                'collegehumor'  => array('small' => array(300, 169), 'medium' => array(450, 254), 'large' => array(600, 338)),
+                'funnyordie'    => array('small' => array(512, 328), 'medium' => array(640, 400), 'large' => array(960, 580)),
+                'wegame'        => array('small' => array(325, 223), 'medium' => array(480, 330), 'large' => array(640, 440)),
+            );
+
+            static $urls = array(
+                'youtube'       => '<iframe src="//youtube.com/embed/{id}" width="{width}" height="{height}" frameborder="0"></iframe>',
+                'vimeo'         => '<iframe src="//player.vimeo.com/video/{id}" width="{width}" height="{height}" frameborder="0"></iframe>',
+                'vevo'          => '<iframe src="//videoplayer.vevo.com/embed/Embedded?videoId={id}&playlist=false&autoplay=0&playerId=62FF0A5C-0D9E-4AC1-AF04-1D9E97EE3961&playerType=embedded{id}" width="{width}" height="{height}" frameborder="0"></iframe>',
+                'veoh'          => '<embed src="//veoh.com/swf/webplayer/WebPlayer.swf?version=AFrontend.5.7.0.1390&amp;permalinkId={id}&amp;player=videodetailsembedded&amp;videoAutoPlay=0&amp;id=anonymous" width="{width}" height="{height}" type="application/x-shockwave-flash"></embed>',
+                'liveleak'      => '<iframe src="//liveleak.com/e/{id}" width="{width}" height="{height}" frameborder="0"></iframe>',
+                'dailymotion'   => '<iframe src="//dailymotion.com/embed/video/{id}" width="{width}" height="{height}" frameborder="0"></iframe>',
+                'myspace'       => '<embed src="//mediaservices.myspace.com/services/media/embed.aspx/m={id},t=1,mt=video" width="{width}" height="{height}" type="application/x-shockwave-flash"></embed>',
+                'collegehumor'  => '<iframe src="//collegehumor.com/e/{id}" width="{width}" height="{height}" frameborder="0"></iframe>',
+                'funnyordie'    => '<iframe src="//funnyordie.com/embed/{id}" width="{width}" height="{height}" frameborder="0"></iframe>',
+                'wegame'        => '<embed src="//wegame.com/static/flash/player.swf?xmlrequest=http://www.wegame.com/player/video/{id}&amp;embedPlayer=true" width="{width}" height="{height}" type="application/x-shockwave-flash"></embed>',
+            );
+
+            $name = $s->getBbCode() ?: $s->getName();
+            if(!array_key_exists($name, $urls)) {
+                return '(Invalid '.$name.' video code)';
+            }
+            if(!preg_match('/^[-_a-z0-9]+$/is', $s->getContent())) {
+                return '(Invalid video)';
+            }
+
+            $size = $s->getParameter('size', 'medium');
+            // var_dump($name, $sizes[$name][$size]);
+            $replaces = array(
+                '{id}' => $s->getContent(),
+                '{width}' => $sizes[$name][$size][0],
+                '{height}' => $sizes[$name][$size][1],
+            );
+
+            return str_replace(array_keys($replaces), array_values($replaces), $urls[$name]);
+        });
+        $handlers->addAlias('youtube', 'video');
+        $handlers->addAlias('liveleak', 'video');
+        $handlers->addAlias('dailymotion', 'video');
+        $handlers->addAlias('veoh', 'video');
+        $handlers->addAlias('myspace', 'video');
+        $handlers->addAlias('wegame', 'video');
+        $handlers->addAlias('collegehumor', 'video');
+        $handlers->addAlias('vimeo', 'video');
+
+        // IMAGE FILTER
+        $handlers->add('image', function(ShortcodeInterface $s) use($isXhtml) {
+            if((mb_substr_count($s->getContent(), 'http://') + mb_substr_count($s->getContent(), 'https://')) > 1) {
+                return null;
+            }
+            if(!preg_match('/^((?:https?:\/)?(?:\.){0,2}\/)((?:.*?)\.(jpg|jpeg|png|gif|bmp))(\?[^#]+)?(#[\-\w]+)?$/is', $s->getContent())) {
+                return '(Invalid img)';
+            }
+            $dims = preg_match('/^([0-9%]{1,4}+)x([0-9%]{1,4}+)$/', $s->getBbCode(), $bb) ? 'width="'.$bb[1].'" height="'.$bb[2].'" ' : '';
+            $width = preg_match('/^([0-9%]{1,4}+)$/', $s->getParameter('width'), $w) ? 'width="'.$w[1].'" ' : '';
+            $height = preg_match('/^([0-9%]{1,4}+)$/', $s->getParameter('height'), $h) ? 'height="'.$h[1].'" ' : '';
+            $alt = $s->getParameter('alt') ? 'alt="'.$s->getParameter('alt').'" ' : '';
+
+            return rtrim('<img class="decoda-image" '.$alt.$width.$height.'src="'.$s->getContent().'" '.$dims.($alt ? '' : 'alt="" ')).($isXhtml ? ' />' : '>');
+        });
+        $handlers->addAlias('img', 'image');
+
+        // BLOCK FILTER
+        $handlers->add('align', function(ShortcodeInterface $s) { return '<div class="align-'.$s->getBbCode().'">'.$s->getContent().'</div>'; });
+        $handlers->add('right', function(ShortcodeInterface $s) { return '<div class="align-right">'.$s->getContent().'</div>'; });
+        $handlers->add('left', function(ShortcodeInterface $s) { return '<div class="align-left">'.$s->getContent().'</div>'; });
+        $handlers->add('center', function(ShortcodeInterface $s) { return '<div class="align-center">'.$s->getContent().'</div>'; });
+        $handlers->add('justify', function(ShortcodeInterface $s) { return '<div class="align-justify">'.$s->getContent().'</div>'; });
+        $handlers->add('float', function(ShortcodeInterface $s) { return '<div class="float-'.$s->getBbCode().'">'.$s->getContent().'</div>'; });
+        $handlers->add('hide', function(ShortcodeInterface $s) { return '<span style="display: none">'.$s->getContent().'</span>'; });
+        $handlers->add('alert', function(ShortcodeInterface $s) { return '<div class="decoda-alert">'.$s->getContent().'</div>'; });
+        $handlers->add('note', function(ShortcodeInterface $s) { return '<div class="decoda-note">'.$s->getContent().'</div>'; });
+        $handlers->add('spoiler', function(ShortcodeInterface $s) { return '<div class="decoda-spoiler">'.$s->getContent().'</div>'; });
+        $handlers->add('div', function(ShortcodeInterface $s) {
+            $regex = '/^[a-zA-Z-_\s]+$/';
+            $id = preg_match($regex, $s->getBbCode()) ? ' id="'.$s->getBbCode().'"' : '';
+            $class = preg_match($regex, $s->getParameter('class', '')) ? ' class="'.$s->getParameter('class', '').'"' : '';
+
+            return '<div'.$id.$class.'>'.$s->getContent().'</div>';
+        });
+
+        // CODE FILTER
+        $handlers->add('code', function(ShortcodeInterface $s) {
+            $lang = $s->getBbCode() ? ' lang-'.$s->getBbCode() : '';
+            $hl = $s->getParameter('hl') ? ' data-line="'.$s->getParameter('hl').'"' : '';
+
+            return '<pre class="decoda-code'.$lang.'"'.$hl.'><code>'.$s->getContent().'</code></pre>';
+        });
+        $handlers->add('source', function(ShortcodeInterface $s) { return '<code>'.$s->getContent().'</code>'; });
+        $handlers->add('var', function(ShortcodeInterface $s) { return '<var>'.$s->getContent().'</var>'; });
+        $handlers->add('quote', function(ProcessedShortcode $s) {
+            $date = $s->getParameter('date') ? date('M jS Y, H:i:s', strtotime($s->getParameter('date'))) : '';
+            $date = $date ? '<span class="decoda-quote-date">'.$date.'</span>' : '';
+
+            $author = $s->getBbCode() ? '<span class="decoda-quote-author">Quote by '.$s->getBbCode().'</span>' : '';
+            $info = $date || $author ? '<div class="decoda-quote-head">'.$date.$author.'<span class="clear"></span></div>' : '';
+
+            return $s->getRecursionLevel() < 3
+                ? '<blockquote class="decoda-quote">'.$info.'<div class="decoda-quote-body">'.$s->getContent().'</div></blockquote>'
+                : '';
+        });
+
+        // SIZE FILTER
+        $handlers->add('font', function(ShortcodeInterface $s) {
+            $font = $s->getBbCode() ? ' style="font-family: '.$s->getBbCode().'"' : '';
+
+            return '<span'.$font.'>'.$s->getContent().'</span>';
+        });
+        $handlers->add('size', function(ShortcodeInterface $s) {
+            $size = preg_match('/^[1-2]{1}[0-9]{1}$/', $s->getBbCode()) ? ' style="font-size: '.$s->getBbCode().'px"' : '';
+
+            return '<span'.$size.'>'.$s->getContent().'</span>';
+        });
+        $handlers->add('color', function(ShortcodeInterface $s) {
+            $color = preg_match('/^(?:#[0-9a-fA-F]{3,6}|[a-z]+)$/', $s->getBbCode()) ? ' style="color: '.$s->getBbCode().'"' : '';
+
+            return '<span'.$color.'>'.$s->getContent().'</span>';
+        });
+        $handlers->add('h1', function(ShortcodeInterface $s) { return '<h1>'.$s->getContent().'</h1>'; });
+        $handlers->add('h2', function(ShortcodeInterface $s) { return '<h2>'.$s->getContent().'</h2>'; });
+        $handlers->add('h3', function(ShortcodeInterface $s) { return '<h3>'.$s->getContent().'</h3>'; });
+        $handlers->add('h4', function(ShortcodeInterface $s) { return '<h4>'.$s->getContent().'</h4>'; });
+        $handlers->add('h5', function(ShortcodeInterface $s) { return '<h5>'.$s->getContent().'</h5>'; });
+        $handlers->add('h6', function(ShortcodeInterface $s) { return '<h6>'.$s->getContent().'</h6>'; });
+
+        // DEFAULT FILTER
+        $handlers->add('b', function(ShortcodeInterface $s) use($isXhtml) {
+            if(!$s->getContent()) {
+                return '';
+            }
+
+            return $isXhtml ? '<strong>'.$s->getContent().'</strong>' : '<b>'.$s->getContent().'</b>';
+        });
+        $handlers->add('i', function(ShortcodeInterface $s) use($isXhtml) {
+            return $isXhtml ? '<em>'.$s->getContent().'</em>' : '<i>'.$s->getContent().'</i>';
+        });
+        $handlers->add('u', function(ShortcodeInterface $s) { return '<u>'.$s->getContent().'</u>'; });
+        $handlers->add('sup', function(ShortcodeInterface $s) { return '<sup>'.$s->getContent().'</sup>'; });
+        $handlers->add('sub', function(ShortcodeInterface $s) { return '<sub>'.$s->getContent().'</sub>'; });
+        $handlers->add('s', function(ShortcodeInterface $s) { return '<del>'.$s->getContent().'</del>'; });
+        $handlers->add('abbr', function(ShortcodeInterface $s) { return '<abbr title="'.$s->getBbCode().'">'.$s->getContent().'</abbr>'; });
+        $handlers->add('br', function(ParsedShortcodeInterface $s) use($isXhtml, $standaloneTags) {
+            if(!$standaloneTags && false === strpos($s->getText(), '/')) {
+                return '';
+            }
+
+            return $isXhtml ? '<br />' : '<br>';
+        });
+        $handlers->add('hr', function() use($isXhtml) { return $isXhtml ? '<hr />' : '<hr>'; });
+        $handlers->add('time', function(ShortcodeInterface $s) {
+            $stamp = strtotime($s->getContent());
+            $iso = date(\DateTime::ISO8601, $stamp);
+            $display = date('D, M jS Y, H:i', $stamp);
+
+            return '<time datetime="'.$iso.'">'.$display.'</time>';
+        });
+
+//        $handlers->setDefault(function(ShortcodeInterface $s) {
+//            return '<'.$s->getName().'>'.$s->getContent().'</'.$s->getName().'>';
+//        });
+        $handlers->setDefault(function(ProcessedShortcode $s) use($handlers) {
+            return $handlers->has(strtolower($s->getName()))
+                ? call_user_func_array($handlers->get(strtolower($s->getName())), array($s))
+                : $s->getShortcodeText();
+        });
+
+        $actual = new HandlerContainer();
+        $actual->setDefault(function(ProcessedShortcode $s) use($handlers) {
+            if($this->getWhitelist() && false === in_array($s->getName(), $this->getWhitelist())) {
+                return $s->getShortcodeText();
+            }
+
+            return call_user_func_array($handlers->get(strtolower($s->getName())), array($s));
+        });
+
+        return $actual;
+    }
+
     /**
      * Parse the node list by looping through each one, validating, applying filters, building and finally concatenating the string.
      *
@@ -684,6 +1052,7 @@ class Decoda {
             } catch (MissingItemException $e) {}
         }
 
+
         // Does not exist in the cache, parse it
         if (!$isCached) {
             $this->_triggerHook('startup');
@@ -691,8 +1060,13 @@ class Decoda {
             $string = $this->_triggerHook('beforeParse', $this->_string);
 
             if ($this->_isParseable($string)) {
-                $string = $this->_parse($this->_extractChunks($string));
+                $syntax = new Syntax($this->_config['open'], $this->_config['close']);
+                $processor = new Processor(new RegularParser($syntax), $this->addHandlers());
+                // $string = str_replace("\n", $this->getConfig('xhtmlOutput') ? '<br/>' : '<br>', $string);
+                // $string = $this->_parse($this->_extractChunks($string));
+                $string = $processor->process($string);
 
+                $string = $this->_parse($this->_extractChunks($string));
             } else {
                 $string = $this->_triggerHook('beforeContent', $string);
                 $string = $this->convertLineBreaks($string);
@@ -932,7 +1306,7 @@ class Decoda {
     }
 
     /**
-     * Toggle whether standalone tags (self-closing tags without the 
+     * Toggle whether standalone tags (self-closing tags without the
      * trailing slash) are allowed.
      *
      * @param bool $status

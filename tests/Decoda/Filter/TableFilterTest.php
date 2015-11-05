@@ -33,7 +33,8 @@ class TableFilterTest extends TestCase {
      * Test the [thead] tag.
      */
     public function testThead() {
-        $this->assertEquals('<table class="decoda-table"><thead></thead></table>', $this->object->reset('[table][thead]Table[/thead][/table]')->parse());
+        $this->assertEquals('<table class="decoda-table"><thead></thead></table>',
+            $this->object->reset('[table][thead]Table[/thead][/table]')->parse());
         $this->assertEquals('Table', $this->object->reset('[thead]Table[/thead]')->parse());
     }
 
@@ -129,7 +130,20 @@ class TableFilterTest extends TestCase {
 [/table]
 TABLE;
 
-        $expected = '<table class="decoda-table"><tbody><tr><td>One</td><td>Two</td></tr><tr><td>One</td><td>Two</td></tr></tbody></table>';
+        $expected = <<<EOF
+<table class="decoda-table">
+    <tbody>
+        <tr>
+            <td>One</td>
+            <td>Two</td>
+        </tr>
+        <tr>
+            <td>One</td>
+            <td>Two</td>
+        </tr>
+    </tbody>
+</table>
+EOF;
         $this->assertEquals($expected, $this->object->reset($string)->parse());
 
         $string = <<<TABLE
@@ -153,7 +167,26 @@ TABLE;
 [/table]
 TABLE;
 
-        $expected = '<table class="decoda-table"><thead><tr><th>One</th><th>Two</th></tr></thead><tbody><tr><td>One</td><td>Two</td></tr><tr><td>One</td><td>Two</td></tr></tbody></table>';
+        $expected = <<<EOF
+<table class="decoda-table">
+    <thead>
+        <tr>
+            <th>One</th>
+            <th>Two</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>One</td>
+            <td>Two</td>
+        </tr>
+        <tr>
+            <td>One</td>
+            <td>Two</td>
+        </tr>
+    </tbody>
+</table>
+EOF;
         $this->assertEquals($expected, $this->object->reset($string)->parse());
 
         // Invalid nesting
@@ -170,7 +203,18 @@ TABLE;
 [/table]
 TABLE;
 
-        $expected = '<table class="decoda-table"><tbody><tr><td>One</td><td>Two</td></tr></tbody></table>';
+        $expected = <<<EOF
+<table class="decoda-table">
+    <tbody>
+        <tr>
+            <td>One</td>
+            <td>Two</td>
+        </tr>
+
+
+    </tbody>
+</table>
+EOF;
         $this->assertEquals($expected, $this->object->reset($string)->parse());
     }
 
